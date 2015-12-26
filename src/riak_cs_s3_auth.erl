@@ -82,13 +82,33 @@ authenticate(User, Signature, RD, Ctx) ->
                           ok | {error, atom()}.
 authenticate_1(User, {v4, Attributes}, RD, _Ctx) ->
     authenticate_v4(User, Attributes, RD);
+
+%%%---------------------------------------------
+%%% @doc modified some code for verify the token
+%%%---------------------------------------------
 authenticate_1(User, Signature, RD, _Ctx) ->
+    Token = wrq:get_qs_value("token", RD),
+    case Token of
+        undefined ->
+            authenticate_2(User,Signature,RD);
+        _->
+            case riak_cs_s3_token:verify_token(Token) of
+                {ok, _} ->
+                    authenticate_2(User,Signature,RD);
+                {error,_} ->
+                    {error, invalid_authentication}
+            end
+    end.
+
+authenticate_2(User,Signature,RD) ->
     CalculatedSignature = calculate_signature_v2(User?RCS_USER.key_secret, RD),
     case check_auth(Signature, CalculatedSignature) of
         true ->
             Expires = wrq:get_qs_value("Expires", RD),
             case Expires of
                 undefined ->
+                    ok;
+                "0"->
                     ok;
                 _ ->
                     {MegaSecs, Secs, _} = os:timestamp(),
@@ -104,7 +124,7 @@ authenticate_1(User, Signature, RD, _Ctx) ->
             end;
         _ ->
             {error, invalid_authentication}
-    end.
+    end.		
 
 %% ===================================================================
 %% Internal functions
@@ -172,6 +192,16 @@ calculate_signature_v2(KeyData, RD) ->
                Expires ->
                    Expires ++ "\n"
            end,
+    %%---------------------------------------------------	
+    %% @doc decide whether it need to check token or not 
+    %%---------------------------------------------------	
+    TokenFlag = case wrq:get_qs_value("token", RD) of
+               undefined ->
+                    [];
+               _Token ->
+                   "1" ++ "\n"
+           end,
+
     CMD5 = case wrq:get_req_header("content-md5", RD) of
                undefined -> [];
                CMD5_0 ->    CMD5_0
@@ -186,6 +216,7 @@ calculate_signature_v2(KeyData, RD) ->
            ContentType,
            "\n",
            Date,
+	   TokenFlag,
            AmazonHeaders,
            Resource],
     _ = lager:debug("STS: ~p", [STS]),
