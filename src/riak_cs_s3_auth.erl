@@ -41,20 +41,20 @@
 -define(PERCENT, 37).  % $\%
 -define(FULLSTOP, 46). % $\.
 -define(QS_SAFE(C), ((C >= $a andalso C =< $z) orelse
-                     (C >= $A andalso C =< $Z) orelse
-                     (C >= $0 andalso C =< $9) orelse
-                     (C =:= ?FULLSTOP orelse C =:= $- orelse C =:= $~ orelse
-                      C =:= $_))).
+    (C >= $A andalso C =< $Z) orelse
+    (C >= $0 andalso C =< $9) orelse
+    (C =:= ?FULLSTOP orelse C =:= $- orelse C =:= $~ orelse
+        C =:= $_))).
 
 %% ===================================================================
 %% Public API
 %% ===================================================================
 
--spec identify(RD::term(), #context{}) ->
-                      {string() | undefined,
-                       string() | {v4, v4_attrs()} | undefined} |
-                      {failed, Reason::atom()}.
-identify(RD,_Ctx) ->
+-spec identify(RD :: term(), #context{}) ->
+    {string() | undefined,
+        string() | {v4, v4_attrs()} | undefined} |
+    {failed, Reason :: atom()}.
+identify(RD, _Ctx) ->
     case wrq:get_req_header("authorization", RD) of
         undefined ->
             identify_by_query_string(RD);
@@ -62,8 +62,8 @@ identify(RD,_Ctx) ->
             parse_auth_header(AuthHeader)
     end.
 
--spec authenticate(rcs_user(), string() | {v4, v4_attrs()}, RD::term(), #context{}) ->
-                          ok | {error, atom()}.
+-spec authenticate(rcs_user(), string() | {v4, v4_attrs()}, RD :: term(), #context{}) ->
+    ok | {error, atom()}.
 authenticate(User, Signature, RD, Ctx) ->
     case wrq:get_req_header("authorization", RD) of
         undefined ->
@@ -78,8 +78,8 @@ authenticate(User, Signature, RD, Ctx) ->
             end
     end.
 
--spec authenticate_1(rcs_user(), string() | {v4, v4_attrs()}, RD::term(), #context{}) ->
-                          ok | {error, atom()}.
+-spec authenticate_1(rcs_user(), string() | {v4, v4_attrs()}, RD :: term(), #context{}) ->
+    ok | {error, atom()}.
 authenticate_1(User, {v4, Attributes}, RD, _Ctx) ->
     authenticate_v4(User, Attributes, RD);
 
@@ -88,19 +88,22 @@ authenticate_1(User, {v4, Attributes}, RD, _Ctx) ->
 %%%---------------------------------------------
 authenticate_1(User, Signature, RD, _Ctx) ->
     Token = wrq:get_qs_value("token", RD),
+    io:format("raw path_info : ~p ~n", [wrq:path_info(RD)]),
+%%    [{bucket,"cloud-file-bucket"},
+%%        {object,"joe%2F139_A_92ECUvrZ4A6IrP3tz6%2Fbaco%2F93frccmY5VxoqGDqPA%2F1.jpeg"}]
     case Token of
         undefined ->
-            authenticate_2(User,Signature,RD);
-        _->
-            case riak_cs_s3_token:verify_token(Token) of
+            authenticate_2(User, Signature, RD);
+        _ ->
+            case riak_cs_s3_token:verify_token(Token, RD) of
                 {ok, _} ->
-                    authenticate_2(User,Signature,RD);
-                {error,_} ->
+                    authenticate_2(User, Signature, RD);
+                {error, _} ->
                     {error, invalid_authentication}
             end
     end.
 
-authenticate_2(User,Signature,RD) ->
+authenticate_2(User, Signature, RD) ->
     CalculatedSignature = calculate_signature_v2(User?RCS_USER.key_secret, RD),
     case check_auth(Signature, CalculatedSignature) of
         true ->
@@ -108,7 +111,7 @@ authenticate_2(User,Signature,RD) ->
             case Expires of
                 undefined ->
                     ok;
-                "0"->
+                "0" ->
                     ok;
                 _ ->
                     {MegaSecs, Secs, _} = os:timestamp(),
@@ -124,7 +127,7 @@ authenticate_2(User,Signature,RD) ->
             end;
         _ ->
             {error, invalid_authentication}
-    end.		
+    end.
 
 %% ===================================================================
 %% Internal functions
@@ -169,7 +172,7 @@ parse_auth_v4_header([KV | KVs], UserId, Acc) ->
                 _ ->
                     parse_auth_v4_header(KVs, UserId, [{Key, Value} | Acc])
             end;
-         _ ->
+        _ ->
             %% Zero or 2+ "=" characters, ignore the token
             parse_auth_v4_header(KVs, UserId, Acc)
     end.
@@ -181,12 +184,12 @@ calculate_signature_v2(KeyData, RD) ->
     OriginalResource = riak_cs_s3_rewrite:original_resource(RD),
     Resource = case OriginalResource of
                    undefined -> []; %% TODO: get noisy here?
-                   {Path,QS} -> [Path, canonicalize_qs(v2, QS)]
+                   {Path, QS} -> [Path, canonicalize_qs(v2, QS)]
                end,
     Date = case wrq:get_qs_value("Expires", RD) of
                undefined ->
                    case proplists:is_defined("x-amz-date", Headers) of
-                       true ->  "\n";
+                       true -> "\n";
                        false -> [wrq:get_req_header("date", RD), "\n"]
                    end;
                Expires ->
@@ -196,37 +199,37 @@ calculate_signature_v2(KeyData, RD) ->
     %% @doc decide whether it need to check token or not 
     %%---------------------------------------------------	
     TokenFlag = case wrq:get_qs_value("token", RD) of
-               undefined ->
-                    [];
-               _Token ->
-                   "1" ++ "\n"
-           end,
+                    undefined ->
+                        [];
+                    _Token ->
+                        "1" ++ "\n"
+                end,
 
     CMD5 = case wrq:get_req_header("content-md5", RD) of
                undefined -> [];
-               CMD5_0 ->    CMD5_0
+               CMD5_0 -> CMD5_0
            end,
     ContentType = case wrq:get_req_header("content-type", RD) of
                       undefined -> [];
                       ContentType0 -> ContentType0
                   end,
     STS = [atom_to_list(wrq:method(RD)), "\n",
-           CMD5,
-           "\n",
-           ContentType,
-           "\n",
-           Date,
-	   TokenFlag,
-           AmazonHeaders,
-           Resource],
+        CMD5,
+        "\n",
+        ContentType,
+        "\n",
+        Date,
+        TokenFlag,
+        AmazonHeaders,
+        Resource],
     _ = lager:debug("STS: ~p", [STS]),
 
     base64:encode_to_string(riak_cs_utils:sha_mac(KeyData, STS)).
 
--spec authenticate_v4(rcs_user(), v4_attrs(), RD::term()) ->
-                             ok |
-                             {error, {unmatched_signature,
-                                      Presented::string(), Calculated::string()}}.
+-spec authenticate_v4(rcs_user(), v4_attrs(), RD :: term()) ->
+    ok |
+    {error, {unmatched_signature,
+        Presented :: string(), Calculated :: string()}}.
 authenticate_v4(?RCS_USER{key_secret = SecretAccessKey} = _User, AuthAttrs, RD) ->
     Method = wrq:method(RD),
     {Path, Qs} = riak_cs_s3_rewrite:raw_url(RD),
@@ -252,15 +255,15 @@ canonical_request_v4(AuthAttrs, Method, Path, Qs, AllHeaders) ->
     CanonicalQs = canonicalize_qs(v4, Qs),
     {"SignedHeaders", SignedHeaders} = lists:keyfind("SignedHeaders", 1, AuthAttrs),
     CanonicalHeaders = canonical_headers_v4(AllHeaders,
-                                            string:tokens(SignedHeaders, [$;])),
+        string:tokens(SignedHeaders, [$;])),
     {"x-amz-content-sha256", HashedPayload} =
         lists:keyfind("x-amz-content-sha256", 1, AllHeaders),
     CanonicalRequest = [atom_to_list(Method), $\n,
-                        strict_url_encode_for_path(Path), $\n,
-                        CanonicalQs, $\n,
-                        CanonicalHeaders, $\n,
-                        SignedHeaders, $\n,
-                        HashedPayload],
+        strict_url_encode_for_path(Path), $\n,
+        CanonicalQs, $\n,
+        CanonicalHeaders, $\n,
+        SignedHeaders, $\n,
+        HashedPayload],
     CanonicalRequest.
 
 canonical_headers_v4(AllHeaders, HeaderNames) ->
@@ -294,17 +297,17 @@ string_to_sign_v4(AuthAttrs, AllHeaders, CanonicalRequest) ->
     %% TODO: Validate `CredDate' be within 7 days
     Scope = [CredDate, $/, AwsRegion, $/, AwsService, $/, AwsRequest],
     {["AWS4-HMAC-SHA256", $\n,
-      TimeStamp, $\n,
-      Scope, $\n,
-      hex_sha256hash(CanonicalRequest)],
-     {CredDate, AwsRegion, AwsService, AwsRequest}}.
+        TimeStamp, $\n,
+        Scope, $\n,
+        hex_sha256hash(CanonicalRequest)],
+        {CredDate, AwsRegion, AwsService, AwsRequest}}.
 
 calculate_signature_v4(SecretAccessKey,
-                       {CredDate, AwsRegion, AwsService, AwsRequest}, StringToSign) ->
-    DateKey              = hmac_sha256(["AWS4", SecretAccessKey], CredDate),
-    DateRegionKey        = hmac_sha256(DateKey, AwsRegion),
+    {CredDate, AwsRegion, AwsService, AwsRequest}, StringToSign) ->
+    DateKey = hmac_sha256(["AWS4", SecretAccessKey], CredDate),
+    DateRegionKey = hmac_sha256(DateKey, AwsRegion),
     DateRegionServiceKey = hmac_sha256(DateRegionKey, AwsService),
-    SigningKey           = hmac_sha256(DateRegionServiceKey, AwsRequest),
+    SigningKey = hmac_sha256(DateRegionServiceKey, AwsRequest),
     mochihex:to_hex(hmac_sha256(SigningKey, StringToSign)).
 
 hmac_sha256(Key, Data) ->
@@ -332,23 +335,23 @@ canonicalize_qs_v2([], []) ->
     [];
 canonicalize_qs_v2([], Acc) ->
     lists:flatten(["?", Acc]);
-canonicalize_qs_v2([{K, []}|T], Acc) ->
+canonicalize_qs_v2([{K, []} | T], Acc) ->
     case lists:member(K, ?SUBRESOURCES) of
         true ->
             Amp = if Acc == [] -> "";
-                     true      -> "&"
+                      true -> "&"
                   end,
-            canonicalize_qs_v2(T, [[K, Amp]|Acc]);
+            canonicalize_qs_v2(T, [[K, Amp] | Acc]);
         false ->
             canonicalize_qs_v2(T, Acc)
     end;
-canonicalize_qs_v2([{K, V}|T], Acc) ->
+canonicalize_qs_v2([{K, V} | T], Acc) ->
     case lists:member(K, ?SUBRESOURCES) of
         true ->
             Amp = if Acc == [] -> "";
-                     true      -> "&"
+                      true -> "&"
                   end,
-            canonicalize_qs_v2(T, [[K, "=", V, Amp]|Acc]);
+            canonicalize_qs_v2(T, [[K, "=", V, Amp] | Acc]);
         false ->
             canonicalize_qs_v2(T, Acc)
     end.
@@ -357,12 +360,12 @@ canonicalize_qs_v4([], []) ->
     [];
 canonicalize_qs_v4([], Acc) ->
     Acc;
-canonicalize_qs_v4([{K, V}|T], Acc) ->
+canonicalize_qs_v4([{K, V} | T], Acc) ->
     Amp = if Acc == [] -> "";
-             true      -> "&"
+              true -> "&"
           end,
     canonicalize_qs_v4(T, [[strict_url_encode_for_qs_value(K), "=",
-                            strict_url_encode_for_qs_value(V), Amp]|Acc]).
+        strict_url_encode_for_qs_value(V), Amp] | Acc]).
 
 %% Force strict URL encoding for keys and values in query part.
 %% For this part, all unsafe characters MUST be encoded including
@@ -379,7 +382,7 @@ strict_url_encode_for_path(Path) ->
     %% latter drops information about preceding and trailing slashes.
     Tokens = binary:split(list_to_binary(Path), <<"/">>, [global]),
     EncodedTokens = [quote_percent(mochiweb_util:unquote(T)) ||
-                        T <- Tokens],
+        T <- Tokens],
     string:join(EncodedTokens, "/").
 
 -spec quote_percent(string()) -> string().
@@ -414,23 +417,23 @@ hexdigit(C) when C < 16 -> $A + (C - 10).
 
 auth_test_() ->
     {spawn,
-     [
-      {setup,
-       fun setup/0,
-       fun teardown/1,
-       fun(_X) ->
-               [
-                example_get_object(),
-                example_put_object(),
-                example_list(),
-                example_fetch(),
-                example_delete(),
-                example_upload(),
-                example_list_all_buckets(),
-                example_unicode_keys()
-               ]
-       end
-      }]}.
+        [
+            {setup,
+                fun setup/0,
+                fun teardown/1,
+                fun(_X) ->
+                    [
+                        example_get_object(),
+                        example_put_object(),
+                        example_list(),
+                        example_fetch(),
+                        example_delete(),
+                        example_upload(),
+                        example_list_all_buckets(),
+                        example_unicode_keys()
+                    ]
+                end
+            }]}.
 
 setup() ->
     application:set_env(riak_cs, verify_client_clock_skew, false),
@@ -441,7 +444,7 @@ teardown(_) ->
     application:unset_env(riak_cs, cs_root_host).
 
 test_fun(Desc, ExpectedSignature, CalculatedSignature) ->
-    {Desc, ?_assert(check_auth(ExpectedSignature,CalculatedSignature))}.
+    {Desc, ?_assert(check_auth(ExpectedSignature, CalculatedSignature))}.
 
 example_get_object() ->
     KeyData = "uV3F3YluFJax1cknvbcGwgjvx4QpvB+leU8dUj2o",
@@ -451,8 +454,8 @@ example_get_object() ->
     Path = "/buckets/johnsmith/objects/photos/puppy.jpg",
     Headers =
         mochiweb_headers:make([{"Host", "s3.amazonaws.com"},
-                               {"Date", "Tue, 27 Mar 2007 19:36:42 +0000"},
-                               {"x-rcs-rewrite-path", OrigPath}]),
+            {"Date", "Tue, 27 Mar 2007 19:36:42 +0000"},
+            {"x-rcs-rewrite-path", OrigPath}]),
     RD = wrq:create(Method, Version, Path, Headers),
     ExpectedSignature = "xXjDGYUmKxnwqr5KXNPGldn5LbA=",
     CalculatedSignature = calculate_signature_v2(KeyData, RD),
@@ -466,10 +469,10 @@ example_put_object() ->
     Path = "/buckets/johnsmith/objects/photos/puppy.jpg",
     Headers =
         mochiweb_headers:make([{"Host", "s3.amazonaws.com"},
-                               {"Content-Type", "image/jpeg"},
-                               {"x-rcs-rewrite-path", OrigPath},
-                               {"Content-Length", 94328},
-                               {"Date", "Tue, 27 Mar 2007 21:15:45 +0000"}]),
+            {"Content-Type", "image/jpeg"},
+            {"x-rcs-rewrite-path", OrigPath},
+            {"Content-Length", 94328},
+            {"Date", "Tue, 27 Mar 2007 21:15:45 +0000"}]),
     RD = wrq:create(Method, Version, Path, Headers),
     ExpectedSignature = "hcicpDDvL9SsO6AkvxqmIWkmOuQ=",
     CalculatedSignature = calculate_signature_v2(KeyData, RD),
@@ -483,9 +486,9 @@ example_list() ->
     Path = "/buckets/johnsmith/objects?prefix=photos&max-keys=50&marker=puppy",
     Headers =
         mochiweb_headers:make([{"User-Agent", "Mozilla/5.0"},
-                               {"Host", "johnsmith.s3.amazonaws.com"},
-                               {"x-rcs-rewrite-path", OrigPath},
-                               {"Date", "Tue, 27 Mar 2007 19:42:41 +0000"}]),
+            {"Host", "johnsmith.s3.amazonaws.com"},
+            {"x-rcs-rewrite-path", OrigPath},
+            {"Date", "Tue, 27 Mar 2007 19:42:41 +0000"}]),
     RD = wrq:create(Method, Version, Path, Headers),
     ExpectedSignature = "jsRt/rhG+Vtp88HrYL706QhE4w4=",
     CalculatedSignature = calculate_signature_v2(KeyData, RD),
@@ -499,8 +502,8 @@ example_fetch() ->
     Path = "/buckets/johnsmith/acl",
     Headers =
         mochiweb_headers:make([{"Host", "johnsmith.s3.amazonaws.com"},
-                               {"x-rcs-rewrite-path", OrigPath},
-                               {"Date", "Tue, 27 Mar 2007 19:44:46 +0000"}]),
+            {"x-rcs-rewrite-path", OrigPath},
+            {"Date", "Tue, 27 Mar 2007 19:44:46 +0000"}]),
     RD = wrq:create(Method, Version, Path, Headers),
     ExpectedSignature = "thdUi9VAkzhkniLj96JIrOPGi0g=",
     CalculatedSignature = calculate_signature_v2(KeyData, RD),
@@ -514,10 +517,10 @@ example_delete() ->
     Path = "/buckets/johnsmith/objects/photos/puppy.jpg",
     Headers =
         mochiweb_headers:make([{"User-Agent", "dotnet"},
-                               {"Host", "s3.amazonaws.com"},
-                               {"x-rcs-rewrite-path", OrigPath},
-                               {"Date", "Tue, 27 Mar 2007 21:20:27 +0000"},
-                               {"x-amz-date", "Tue, 27 Mar 2007 21:20:26 +0000"}]),
+            {"Host", "s3.amazonaws.com"},
+            {"x-rcs-rewrite-path", OrigPath},
+            {"Date", "Tue, 27 Mar 2007 21:20:27 +0000"},
+            {"x-amz-date", "Tue, 27 Mar 2007 21:20:26 +0000"}]),
     RD = wrq:create(Method, Version, Path, Headers),
     ExpectedSignature = "k3nL7gH3+PadhTEVn5Ip83xlYzk=",
     CalculatedSignature = calculate_signature_v2(KeyData, RD),
@@ -540,19 +543,19 @@ example_upload() ->
     Path = "/buckets/static.johnsmith.net/objects/db-backup.dat.gz",
     Headers =
         mochiweb_headers:make([{"User-Agent", "curl/7.15.5"},
-                               {"Host", "static.johnsmith.net:8080"},
-                               {"Date", "Tue, 27 Mar 2007 21:06:08 +0000"},
-                               {"x-rcs-rewrite-path", OrigPath},
-                               {"x-amz-acl", "public-read"},
-                               {"content-type", "application/x-download"},
-                               {"Content-MD5", "4gJE4saaMU4BqNR0kLY+lw=="},
-                               {"X-Amz-Meta-ReviewedBy", "joe@johnsmith.net,jane@johnsmith.net"},
-                               %% {"X-Amz-Meta-ReviewedBy", "jane@johnsmith.net"},
-                               {"X-Amz-Meta-FileChecksum", "0x02661779"},
-                               {"X-Amz-Meta-ChecksumAlgorithm", "crc32"},
-                               {"Content-Disposition", "attachment; filename=database.dat"},
-                               {"Content-Encoding", "gzip"},
-                               {"Content-Length", 5913339}]),
+            {"Host", "static.johnsmith.net:8080"},
+            {"Date", "Tue, 27 Mar 2007 21:06:08 +0000"},
+            {"x-rcs-rewrite-path", OrigPath},
+            {"x-amz-acl", "public-read"},
+            {"content-type", "application/x-download"},
+            {"Content-MD5", "4gJE4saaMU4BqNR0kLY+lw=="},
+            {"X-Amz-Meta-ReviewedBy", "joe@johnsmith.net,jane@johnsmith.net"},
+            %% {"X-Amz-Meta-ReviewedBy", "jane@johnsmith.net"},
+            {"X-Amz-Meta-FileChecksum", "0x02661779"},
+            {"X-Amz-Meta-ChecksumAlgorithm", "crc32"},
+            {"Content-Disposition", "attachment; filename=database.dat"},
+            {"Content-Encoding", "gzip"},
+            {"Content-Length", 5913339}]),
     RD = wrq:create(Method, Version, Path, Headers),
     ExpectedSignature = "C0FlOtU8Ylb9KDTpZqYkZPX91iI=",
     CalculatedSignature = calculate_signature_v2(KeyData, RD),
@@ -565,8 +568,8 @@ example_list_all_buckets() ->
     Path = "/",
     Headers =
         mochiweb_headers:make([{"Host", "s3.amazonaws.com"},
-                               {"x-rcs-rewrite-path", Path},
-                               {"Date", "Wed, 28 Mar 2007 01:29:59 +0000"}]),
+            {"x-rcs-rewrite-path", Path},
+            {"Date", "Wed, 28 Mar 2007 01:29:59 +0000"}]),
     RD = wrq:create(Method, Version, Path, Headers),
     ExpectedSignature = "Db+gepJSUbZKwpx1FR0DLtEYoZA=",
     CalculatedSignature = calculate_signature_v2(KeyData, RD),
@@ -580,8 +583,8 @@ example_unicode_keys() ->
     Path = "/buckets/dictionary/objects/fran%C3%A7ais/pr%c3%a9f%c3%a8re",
     Headers =
         mochiweb_headers:make([{"Host", "s3.amazonaws.com"},
-                               {"x-rcs-rewrite-path", OrigPath},
-                               {"Date", "Wed, 28 Mar 2007 01:49:49 +0000"}]),
+            {"x-rcs-rewrite-path", OrigPath},
+            {"Date", "Wed, 28 Mar 2007 01:49:49 +0000"}]),
     RD = wrq:create(Method, Version, Path, Headers),
     ExpectedSignature = "dxhSBHoI6eVSPcXJqEghlUzZMnY=",
     CalculatedSignature = calculate_signature_v2(KeyData, RD),
