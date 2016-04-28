@@ -19,3 +19,5 @@ dialyzer.ignore-warnings
 dialyzer_warnings
 dialyzer_unhandled_warnings
 riak_test/src/downgrade_bitcask.erl
+.idea/
+riak_cs.iml

@@ -8,7 +8,8 @@
 %%%-------------------------------------------------------------------
 -module(riak_cs_s3_token).
 -author("dasudian").
-
+-define(BucketTypeForDownloadTimes, <<"dsd_cf_downloadtimes">>).
+-define(BucketNameForDownloadTimes, <<"dsd_cf_downloadtimes">>).
 %% --------------------------------------------------------------------------------------
 %% API Function Exports
 %% --------------------------------------------------------------------------------------
@@ -28,7 +29,7 @@ decode_token(Token, RD) ->
         PathInfo = wrq:path_info(RD),
         Object = proplists:get_value(object, PathInfo),
 
-        io:format("object :~p ~n", [Object]),
+        lager:debug("object :~p ~n", [Object]),
 
         L = re:split(Object, "%2F"),
 
@@ -55,11 +56,24 @@ decode_token(Token, RD) ->
         ok = verify(Pri, AppID, AppId, UserID, UserId),
         Key = re:replace(Object, "%2F", "/", [global, {return, list}]),
         timeout(Timeout, Key),
+        %% verify this file's status from CloudFile Server
+        {ok, _} = verify_file_status(Key),
+        %% verify success, then counter +1,means this file's download times plus 1;
+        %% BucketName:files_info; Key:file's path; Value:[{download_times, 100}]
+        {ok, RcPid} = riak_cs_riak_client:checkout(request_pool),
+        {ok, Pid} = riak_cs_riak_client:master_pbc(RcPid),
+        Result = download_times_plus1(Pid, ?BucketTypeForDownloadTimes, ?BucketNameForDownloadTimes, riak_cs_utils:to_binary(Key)),
+        case Result of
+            ok ->
+                lager:debug("download_times plus 1 success!~n");
+            Reason ->
+                lager:error("download_times plus 1 fail! Reason = ~p~n", [Reason])
+        end,
         io:format("decrypt : ~p ~n", [{AppId, UserId, ClientId, Random, TokenSecret}]),
         {ok, {AppId, UserId, ClientId, Random, TokenSecret}}
     catch
         _:Why ->
-            io:format("get error why :~p ~n", [Why]),
+            lager:error("get error why :~p ~n", [Why]),
             {error, invalid}
     end.
 
@@ -99,6 +113,69 @@ timeout(-1, Key) ->
 timeout(_, _) -> ok.
 
 delete(Bucket, Key) ->
-    io:format("delete : ~p ~n", [Key]),
+    lager:debug("delete : ~p ~n", [Key]),
     {ok, Pid} = riak_cs_riak_client:checkout(request_pool),
     riak_cs_utils:delete_object(Bucket, Key, Pid).
+
+verify_file_status(Key) ->
+    Data = riak_cs_utils:to_json([{<<"key">>, Key}]),
+    {ok, Cf_host} = application:get_env(riak_cs, cf_host),
+    Url = Cf_host ++ "/get_file_status",
+    Status =
+    case httpc_client:post1(Url, Data) of
+        {ok, Res} ->
+            Response = riak_cs_utils:from_json(riak_cs_utils:to_binary(Res)),
+            lager:debug("Request CF Server Response = ~p", [Response]),
+            Result = proplists:get_value(<<"result">>,Response),
+            case riak_cs_utils:to_binary(Result) =:= <<"success">> of
+                true ->
+                    proplists:get_value(<<"status">>,Response);
+                _->
+                    lager:error("request error ~n"),
+                    2
+            end;
+        {error, Reason} ->
+            lager:error("request error:~p~n",[Reason]),
+            2
+    end,
+    lager:debug("verify file status Status = ~p", [Status]),
+    case riak_cs_utils:to_integer(Status) of
+        0 ->
+            {ok, 0};
+        1 ->
+            lager:warning("File was locked, can not download!"),
+            {warning, 1};
+        Other ->
+            lager:error("Request Error"),
+            {error, Other}
+    end.
+
+download_times_plus1(Pid, BucketType, BucketName, Key) ->
+    lager:debug("download_times_plus1:Pid = ~p,BucketType = ~p,BucketName = ~p,Key = ~p~n", [Pid, BucketType, BucketName, Key]),
+    NewObj =
+    case riakc_pb_socket:get(Pid, {BucketType, BucketName}, Key) of
+        {ok, Obj} ->
+            update(Obj);
+        {error, notfound} ->
+            create(BucketType, BucketName, Key);
+        R ->
+            lager:error("Error:DownloadTimesPlus1,Reason:~p~n", [R])
+    end,
+    riakc_pb_socket:put(Pid, NewObj).
+
+update(Obj) ->
+    io:format("update~n"),
+    OldContentJson = riakc_obj:get_value(Obj),
+    OldContent = riak_cs_utils:from_json(OldContentJson),
+    Key = proplists:get_value(<<"key">>, OldContent),
+    DownloadTimes = proplists:get_value(<<"downloadtimes">>, OldContent),
+    NewContent = [{key, Key}, {downloadtimes, DownloadTimes + 1}],
+    NewContentJson = riak_cs_utils:to_json(NewContent),
+    %NewValue = erlang:binary_to_term(Value) + 1,
+    riakc_obj:update_value(Obj, NewContentJson).
+
+create(BucketType, BucketName, Key) ->
+    io:format("create~n"),
+    Content = [{<<"key">>, Key}, {<<"downloadtimes">>, 1}],
+    ContentJson = riak_cs_utils:to_json(Content),
+    riakc_obj:new({BucketType, BucketName}, Key, ContentJson, "application/json").

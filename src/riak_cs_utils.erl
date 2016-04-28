@@ -68,6 +68,9 @@
          camel_case/1,
          capitalize/1
         ]).
+-export([to_atom/1,to_binary/1,to_integer/1,to_list/1]).
+-export([proplists_delete/2,proplists_get/2]).
+-export([to_json/1, from_json/1]).
 
 -include("riak_cs.hrl").
 -include_lib("riak_pb/include/riak_pb_kv_codec.hrl").
@@ -557,3 +560,78 @@ camel_case_test() ->
     ?assertEqual("AbcXyz123", camel_case(abc_xyz_123)).
 
 -endif.
+
+to_atom(X) when is_list(X)->
+    list_to_atom(X);
+to_atom(X) when is_float(X)->
+    to_atom(float_to_list(X));
+to_atom(X) when is_binary(X)->
+    to_atom(binary_to_list(X));
+to_atom(X) when is_integer(X)->
+    to_atom(integer_to_list(X));
+to_atom(X) when is_atom(X)->
+    X.
+
+to_binary(X) when is_atom(X) ->
+    to_binary(atom_to_list(X));
+to_binary(X) when is_integer(X) ->
+    to_binary(integer_to_list(X));
+to_binary(X) when is_float(X)->
+    float_to_binary(X);
+to_binary(X) when is_list(X) ->
+    list_to_binary(X);
+to_binary(X) when is_binary(X) ->
+    X.
+
+to_integer(X) when is_atom(X)->
+    to_integer(atom_to_list(X));
+to_integer(X) when is_list(X)->
+    list_to_integer(X);
+to_integer(X) when is_float(X)->
+    to_integer(float_to_binary(X));
+to_integer(X) when is_binary(X)->
+    binary_to_integer(X);
+to_integer(X) when is_integer(X)->
+    X.
+
+
+to_list(X) when is_atom(X)->
+    atom_to_list(X);
+to_list(X) when is_binary(X)->
+    binary_to_list(X);
+to_list(X) when is_integer(X)->
+    integer_to_list(X);
+to_list(X) when is_float(X)->
+    float_to_list(X);
+to_list(X) when is_list(X) ->
+    X.
+
+
+proplists_delete(Key, Proplists) when is_atom(Key) ->
+    proplists:delete(Key, Proplists);
+proplists_delete([], Proplists) ->
+    Proplists;
+proplists_delete([Key | KeyList], Proplists) ->
+    proplists_delete(KeyList, proplists:delete(Key, Proplists)).
+
+
+proplists_get(Key,Proplists) when is_atom(Key)->
+    proplists_get([Key],Proplists);
+proplists_get(Keylist,Proplists) when is_list(Keylist) ->
+    proplists_get(Keylist,Proplists,[]).
+
+proplists_get([],_Proplists,Results) ->
+    Results;
+proplists_get([Key|KeyList],Proplists,Results) ->
+    case proplists:get_value(Key,Proplists) of
+        undefined->
+            proplists_get(KeyList,Proplists,Results);
+        Value->
+            proplists_get(KeyList,proplists:delete(Key,Proplists),[{Key,Value}|Results])
+    end.
+
+to_json(PropList) ->
+    jsonx:encode(PropList).
+
+from_json(Json) ->
+    jsonx:decode(Json, [{format, proplist}]).
