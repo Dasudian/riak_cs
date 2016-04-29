@@ -71,6 +71,7 @@
 -export([to_atom/1,to_binary/1,to_integer/1,to_list/1]).
 -export([proplists_delete/2,proplists_get/2]).
 -export([to_json/1, from_json/1]).
+-export([seconds_now/0]).
 
 -include("riak_cs.hrl").
 -include_lib("riak_pb/include/riak_pb_kv_codec.hrl").
@@ -635,3 +636,8 @@ to_json(PropList) ->
 
 from_json(Json) ->
     jsonx:decode(Json, [{format, proplist}]).
+
+seconds_now() ->
+    {M, S, _} = erlang:now(),
+    M * 1000000 + S.
+

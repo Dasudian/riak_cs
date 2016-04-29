@@ -58,6 +58,8 @@ decode_token(Token, RD) ->
         timeout(Timeout, Key),
         %% verify this file's status from CloudFile Server
         {ok, _} = verify_file_status(Key),
+        %% update stats
+        riak_cs_s3_stats:add_new_download(riak_cs_utils:to_binary(AppId)),
         %% verify success, then counter +1,means this file's download times plus 1;
         %% BucketName:files_info; Key:file's path; Value:[{download_times, 100}]
         {ok, RcPid} = riak_cs_riak_client:checkout(request_pool),

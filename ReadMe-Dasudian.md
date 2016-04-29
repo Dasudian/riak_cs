@@ -2,9 +2,9 @@
 
 - add application `jsonx` as deps
 - add `httpc_client` module
-- add some common functions in `riak_cs_utils` module 
-- modify `riak_cs_s3_token` module for download a file:add statistic for download times,add judge 
-  for file's state when download. 
+- add some common functions in `riak_cs_utils` module
+- add some moudle for statistic the download times,such as `riak_cs_s3_stats` `lib_riak`
+- modify the flow for `riak_cs_s3_token` module when download a file
   
 ## Extra Configure
 
