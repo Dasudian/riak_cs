@@ -210,6 +210,20 @@ produce_body(RD, Ctx=#context{rc_pool=RcPool,
        true ->
             ok
     end,
+
+    Token = wrq:get_qs_value("token", RD),
+    case Token of
+        undefined ->
+            go_on;
+        _ ->
+            PathInfo = wrq:path_info(RD),
+            Object = proplists:get_value(object, PathInfo),
+            lager:debug("object :~p ~n", [Object]),
+            L = re:split(Object, "%2F"),
+            AppID = binary_to_list(lists:nth(2, L)),
+            lager:debug("AppId=~p~n",[AppID]),
+            send_usage_record:send(AppID,"cf","cf_download",ResourceLength,1024*1024)
+    end,
     {{known_length_stream, ResourceLength, StreamBody}, NewRQ2, NewCtx}.
 
 parse_range(RD, ResourceLength) ->

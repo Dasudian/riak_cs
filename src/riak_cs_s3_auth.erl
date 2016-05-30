@@ -88,7 +88,6 @@ authenticate_1(User, {v4, Attributes}, RD, _Ctx) ->
 %%%---------------------------------------------
 authenticate_1(User, Signature, RD, _Ctx) ->
     Token = wrq:get_qs_value("token", RD),
-    io:format("raw path_info : ~p ~n", [wrq:path_info(RD)]),
 %%    [{bucket,"cloud-file-bucket"},
 %%        {object,"joe%2F139_A_92ECUvrZ4A6IrP3tz6%2Fbaco%2F93frccmY5VxoqGDqPA%2F1.jpeg"}]
     case Token of
